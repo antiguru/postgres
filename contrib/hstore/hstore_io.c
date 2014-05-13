@@ -12,6 +12,7 @@
 #include "libpq/pqformat.h"
 #include "utils/builtins.h"
 #include "utils/json.h"
+#include "utils/jsonb.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/typcache.h"
@@ -400,7 +401,6 @@ hstorePairs(Pairs *pairs, int32 pcount, int32 buflen)
 
 
 PG_FUNCTION_INFO_V1(hstore_in);
-Datum		hstore_in(PG_FUNCTION_ARGS);
 Datum
 hstore_in(PG_FUNCTION_ARGS)
 {
@@ -421,7 +421,6 @@ hstore_in(PG_FUNCTION_ARGS)
 
 
 PG_FUNCTION_INFO_V1(hstore_recv);
-Datum		hstore_recv(PG_FUNCTION_ARGS);
 Datum
 hstore_recv(PG_FUNCTION_ARGS)
 {
@@ -485,7 +484,6 @@ hstore_recv(PG_FUNCTION_ARGS)
 
 
 PG_FUNCTION_INFO_V1(hstore_from_text);
-Datum		hstore_from_text(PG_FUNCTION_ARGS);
 Datum
 hstore_from_text(PG_FUNCTION_ARGS)
 {
@@ -522,7 +520,6 @@ hstore_from_text(PG_FUNCTION_ARGS)
 
 
 PG_FUNCTION_INFO_V1(hstore_from_arrays);
-Datum		hstore_from_arrays(PG_FUNCTION_ARGS);
 Datum
 hstore_from_arrays(PG_FUNCTION_ARGS)
 {
@@ -640,7 +637,6 @@ hstore_from_arrays(PG_FUNCTION_ARGS)
 
 
 PG_FUNCTION_INFO_V1(hstore_from_array);
-Datum		hstore_from_array(PG_FUNCTION_ARGS);
 Datum
 hstore_from_array(PG_FUNCTION_ARGS)
 {
@@ -754,7 +750,6 @@ typedef struct RecordIOData
 } RecordIOData;
 
 PG_FUNCTION_INFO_V1(hstore_from_record);
-Datum		hstore_from_record(PG_FUNCTION_ARGS);
 Datum
 hstore_from_record(PG_FUNCTION_ARGS)
 {
@@ -908,7 +903,6 @@ hstore_from_record(PG_FUNCTION_ARGS)
 
 
 PG_FUNCTION_INFO_V1(hstore_populate_record);
-Datum		hstore_populate_record(PG_FUNCTION_ARGS);
 Datum
 hstore_populate_record(PG_FUNCTION_ARGS)
 {
@@ -1121,7 +1115,6 @@ cpw(char *dst, char *src, int len)
 }
 
 PG_FUNCTION_INFO_V1(hstore_out);
-Datum		hstore_out(PG_FUNCTION_ARGS);
 Datum
 hstore_out(PG_FUNCTION_ARGS)
 {
@@ -1193,7 +1186,6 @@ hstore_out(PG_FUNCTION_ARGS)
 
 
 PG_FUNCTION_INFO_V1(hstore_send);
-Datum		hstore_send(PG_FUNCTION_ARGS);
 Datum
 hstore_send(PG_FUNCTION_ARGS)
 {
@@ -1240,7 +1232,6 @@ hstore_send(PG_FUNCTION_ARGS)
  * (think zip codes or phone numbers starting with 0).
  */
 PG_FUNCTION_INFO_V1(hstore_to_json_loose);
-Datum		hstore_to_json_loose(PG_FUNCTION_ARGS);
 Datum
 hstore_to_json_loose(PG_FUNCTION_ARGS)
 {
@@ -1254,7 +1245,7 @@ hstore_to_json_loose(PG_FUNCTION_ARGS)
 				dst;
 
 	if (count == 0)
-		PG_RETURN_TEXT_P(cstring_to_text_with_len("{}",2));
+		PG_RETURN_TEXT_P(cstring_to_text_with_len("{}", 2));
 
 	initStringInfo(&tmp);
 	initStringInfo(&dst);
@@ -1332,7 +1323,6 @@ hstore_to_json_loose(PG_FUNCTION_ARGS)
 }
 
 PG_FUNCTION_INFO_V1(hstore_to_json);
-Datum		hstore_to_json(PG_FUNCTION_ARGS);
 Datum
 hstore_to_json(PG_FUNCTION_ARGS)
 {
@@ -1345,7 +1335,7 @@ hstore_to_json(PG_FUNCTION_ARGS)
 				dst;
 
 	if (count == 0)
-		PG_RETURN_TEXT_P(cstring_to_text_with_len("{}",2));
+		PG_RETURN_TEXT_P(cstring_to_text_with_len("{}", 2));
 
 	initStringInfo(&tmp);
 	initStringInfo(&dst);
@@ -1373,4 +1363,157 @@ hstore_to_json(PG_FUNCTION_ARGS)
 	appendStringInfoChar(&dst, '}');
 
 	PG_RETURN_TEXT_P(cstring_to_text(dst.data));
+}
+
+PG_FUNCTION_INFO_V1(hstore_to_jsonb);
+Datum
+hstore_to_jsonb(PG_FUNCTION_ARGS)
+{
+	HStore	   *in = PG_GETARG_HS(0);
+	int			i;
+	int			count = HS_COUNT(in);
+	char	   *base = STRPTR(in);
+	HEntry	   *entries = ARRPTR(in);
+	JsonbParseState *state = NULL;
+	JsonbValue *res;
+
+	res = pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+
+	for (i = 0; i < count; i++)
+	{
+		JsonbValue	key,
+					val;
+
+		key.type = jbvString;
+		key.val.string.len = HS_KEYLEN(entries, i);
+		key.val.string.val = HS_KEY(entries, base, i);
+
+		res = pushJsonbValue(&state, WJB_KEY, &key);
+
+		if (HS_VALISNULL(entries, i))
+		{
+			val.type = jbvNull;
+		}
+		else
+		{
+			val.type = jbvString;
+			val.val.string.len = HS_VALLEN(entries, i);
+			val.val.string.val = HS_VAL(entries, base, i);
+		}
+		res = pushJsonbValue(&state, WJB_VALUE, &val);
+	}
+
+	res = pushJsonbValue(&state, WJB_END_OBJECT, NULL);
+
+	PG_RETURN_POINTER(JsonbValueToJsonb(res));
+}
+
+PG_FUNCTION_INFO_V1(hstore_to_jsonb_loose);
+Datum
+hstore_to_jsonb_loose(PG_FUNCTION_ARGS)
+{
+	HStore	   *in = PG_GETARG_HS(0);
+	int			i;
+	int			count = HS_COUNT(in);
+	char	   *base = STRPTR(in);
+	HEntry	   *entries = ARRPTR(in);
+	JsonbParseState *state = NULL;
+	JsonbValue *res;
+	StringInfoData tmp;
+	bool		is_number;
+
+	initStringInfo(&tmp);
+
+	res = pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+
+	for (i = 0; i < count; i++)
+	{
+		JsonbValue	key,
+					val;
+
+		key.type = jbvString;
+		key.val.string.len = HS_KEYLEN(entries, i);
+		key.val.string.val = HS_KEY(entries, base, i);
+
+		res = pushJsonbValue(&state, WJB_KEY, &key);
+
+		if (HS_VALISNULL(entries, i))
+		{
+			val.type = jbvNull;
+		}
+		/* guess that values of 't' or 'f' are booleans */
+		else if (HS_VALLEN(entries, i) == 1 && *(HS_VAL(entries, base, i)) == 't')
+		{
+			val.type = jbvBool;
+			val.val.boolean = true;
+		}
+		else if (HS_VALLEN(entries, i) == 1 && *(HS_VAL(entries, base, i)) == 'f')
+		{
+			val.type = jbvBool;
+			val.val.boolean = false;
+		}
+		else
+		{
+			is_number = false;
+			resetStringInfo(&tmp);
+
+			appendBinaryStringInfo(&tmp, HS_VAL(entries, base, i), HS_VALLEN(entries, i));
+
+			/*
+			 * don't treat something with a leading zero followed by another
+			 * digit as numeric - could be a zip code or similar
+			 */
+			if (tmp.len > 0 &&
+				!(tmp.data[0] == '0' &&
+				  isdigit((unsigned char) tmp.data[1])) &&
+				strspn(tmp.data, "+-0123456789Ee.") == tmp.len)
+			{
+				/*
+				 * might be a number. See if we can input it as a numeric
+				 * value. Ignore any actual parsed value.
+				 */
+				char	   *endptr = "junk";
+				long		lval;
+
+				lval = strtol(tmp.data, &endptr, 10);
+				(void) lval;
+				if (*endptr == '\0')
+				{
+					/*
+					 * strol man page says this means the whole string is
+					 * valid
+					 */
+					is_number = true;
+				}
+				else
+				{
+					/* not an int - try a double */
+					double		dval;
+
+					dval = strtod(tmp.data, &endptr);
+					(void) dval;
+					if (*endptr == '\0')
+						is_number = true;
+				}
+			}
+			if (is_number)
+			{
+				val.type = jbvNumeric;
+				val.val.numeric = DatumGetNumeric(
+												  DirectFunctionCall3(numeric_in, CStringGetDatum(tmp.data), 0, -1));
+
+			}
+			else
+			{
+				val.type = jbvString;
+				val.val.string.len = HS_VALLEN(entries, i);
+				val.val.string.val = HS_VAL(entries, base, i);
+			}
+		}
+		res = pushJsonbValue(&state, WJB_VALUE, &val);
+	}
+
+	res = pushJsonbValue(&state, WJB_END_OBJECT, NULL);
+
+	PG_RETURN_POINTER(JsonbValueToJsonb(res));
 }

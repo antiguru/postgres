@@ -50,8 +50,8 @@ typedef struct LWLock
 	char		exclusive;		/* # of exclusive holders (0 or 1) */
 	int			shared;			/* # of shared holders (0..MaxBackends) */
 	int			tranche;		/* tranche ID */
-	struct PGPROC *head;			/* head of list of waiting PGPROCs */
-	struct PGPROC *tail;			/* tail of list of waiting PGPROCs */
+	struct PGPROC *head;		/* head of list of waiting PGPROCs */
+	struct PGPROC *tail;		/* tail of list of waiting PGPROCs */
 	/* tail is undefined when head is NULL */
 } LWLock;
 
@@ -150,7 +150,7 @@ extern PGDLLIMPORT LWLockPadded *MainLWLockArray;
 #define BUFFER_MAPPING_LWLOCK_OFFSET	NUM_INDIVIDUAL_LWLOCKS
 #define LOCK_MANAGER_LWLOCK_OFFSET		\
 	(BUFFER_MAPPING_LWLOCK_OFFSET + NUM_BUFFER_PARTITIONS)
-#define PREDICATELOCK_MANAGER_LWLOCK_OFFSET	\
+#define PREDICATELOCK_MANAGER_LWLOCK_OFFSET \
 	(NUM_INDIVIDUAL_LWLOCKS + NUM_LOCK_PARTITIONS)
 #define NUM_FIXED_LWLOCKS \
 	(PREDICATELOCK_MANAGER_LWLOCK_OFFSET + NUM_PREDICATELOCK_PARTITIONS)
@@ -169,12 +169,16 @@ typedef enum LWLockMode
 extern bool Trace_lwlocks;
 #endif
 
-extern void LWLockAcquire(LWLock *lock, LWLockMode mode);
+extern bool LWLockAcquire(LWLock *lock, LWLockMode mode);
 extern bool LWLockConditionalAcquire(LWLock *lock, LWLockMode mode);
 extern bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode);
 extern void LWLockRelease(LWLock *lock);
 extern void LWLockReleaseAll(void);
 extern bool LWLockHeldByMe(LWLock *lock);
+
+extern bool LWLockAcquireWithVar(LWLock *lock, uint64 *valptr, uint64 val);
+extern bool LWLockWaitForVar(LWLock *lock, uint64 *valptr, uint64 oldval, uint64 *newval);
+extern void LWLockUpdateVar(LWLock *lock, uint64 *valptr, uint64 value);
 
 extern Size LWLockShmemSize(void);
 extern void CreateLWLocks(void);
@@ -201,7 +205,7 @@ extern LWLock *LWLockAssign(void);
  * mapped at the same address in all coordinating backends, so storing the
  * registration in the main shared memory segment wouldn't work for that case.
  */
-extern int LWLockNewTrancheId(void);
+extern int	LWLockNewTrancheId(void);
 extern void LWLockRegisterTranche(int, LWLockTranche *);
 extern void LWLockInitialize(LWLock *, int tranche_id);
 

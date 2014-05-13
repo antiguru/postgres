@@ -106,14 +106,14 @@ CleanupPriorWALFiles(void)
 
 	if ((xldir = opendir(archiveLocation)) != NULL)
 	{
-		while ((xlde = readdir(xldir)) != NULL)
+		while (errno = 0, (xlde = readdir(xldir)) != NULL)
 		{
 			strncpy(walfile, xlde->d_name, MAXPGPATH);
 			TrimExtension(walfile, additional_ext);
 
 			/*
 			 * We ignore the timeline part of the XLOG segment identifiers in
-			 * deciding whether a segment is still needed.	This ensures that
+			 * deciding whether a segment is still needed.  This ensures that
 			 * we won't prematurely remove a segment from a parent timeline.
 			 * We could probably be a little more proactive about removing
 			 * segments of non-parent timelines, but that would be a whole lot
@@ -140,7 +140,7 @@ CleanupPriorWALFiles(void)
 				{
 					/*
 					 * Prints the name of the file to be removed and skips the
-					 * actual removal.	The regular printout is so that the
+					 * actual removal.  The regular printout is so that the
 					 * user can pipe the output into some other program.
 					 */
 					printf("%s\n", WALFilePath);
@@ -164,7 +164,13 @@ CleanupPriorWALFiles(void)
 				}
 			}
 		}
-		closedir(xldir);
+
+		if (errno)
+			fprintf(stderr, "%s: could not read archive location \"%s\": %s\n",
+					progname, archiveLocation, strerror(errno));
+		if (closedir(xldir))
+			fprintf(stderr, "%s: could not close archive location \"%s\": %s\n",
+					progname, archiveLocation, strerror(errno));
 	}
 	else
 		fprintf(stderr, "%s: could not open archive location \"%s\": %s\n",

@@ -50,6 +50,7 @@
 #include "postmaster/postmaster.h"
 #include "storage/proc.h"
 #include "storage/backendid.h"
+#include "storage/dsm.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
@@ -347,7 +348,7 @@ pgstat_init(void)
 	 * Create the UDP socket for sending and receiving statistic messages
 	 */
 	hints.ai_flags = AI_PASSIVE;
-	hints.ai_family = PF_UNSPEC;
+	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_protocol = 0;
 	hints.ai_addrlen = 0;
@@ -367,7 +368,7 @@ pgstat_init(void)
 	 * On some platforms, pg_getaddrinfo_all() may return multiple addresses
 	 * only one of which will actually work (eg, both IPv6 and IPv4 addresses
 	 * when kernel will reject IPv6).  Worse, the failure may occur at the
-	 * bind() or perhaps even connect() stage.	So we must loop through the
+	 * bind() or perhaps even connect() stage.  So we must loop through the
 	 * results till we find a working combination. We will generate LOG
 	 * messages, but no error, for bogus combinations.
 	 */
@@ -615,7 +616,7 @@ pgstat_reset_remove_files(const char *directory)
 /*
  * pgstat_reset_all() -
  *
- * Remove the stats files.	This is currently used only if WAL
+ * Remove the stats files.  This is currently used only if WAL
  * recovery is needed after a crash.
  */
 void
@@ -676,7 +677,7 @@ pgstat_start(void)
 	/*
 	 * Do nothing if too soon since last collector start.  This is a safety
 	 * valve to protect against continuous respawn attempts if the collector
-	 * is dying immediately at launch.	Note that since we will be re-called
+	 * is dying immediately at launch.  Note that since we will be re-called
 	 * from the postmaster main loop, we will get another chance later.
 	 */
 	curtime = time(NULL);
@@ -709,6 +710,7 @@ pgstat_start(void)
 			on_exit_reset();
 
 			/* Drop our connection to postmaster's shared memory, as well */
+			dsm_detach_all();
 			PGSharedMemoryDetach();
 
 			PgstatCollectorMain(0, NULL);
@@ -1120,7 +1122,7 @@ pgstat_vacuum_stat(void)
  *
  *	Collect the OIDs of all objects listed in the specified system catalog
  *	into a temporary hash table.  Caller should hash_destroy the result
- *	when done with it.	(However, we make the table in CurrentMemoryContext
+ *	when done with it.  (However, we make the table in CurrentMemoryContext
  *	so that it will be freed properly in event of an error.)
  * ----------
  */
@@ -1372,7 +1374,7 @@ pgstat_report_analyze(Relation rel,
 	 * have counted such rows as live or dead respectively. Because we will
 	 * report our counts of such rows at transaction end, we should subtract
 	 * off these counts from what we send to the collector now, else they'll
-	 * be double-counted after commit.	(This approach also ensures that the
+	 * be double-counted after commit.  (This approach also ensures that the
 	 * collector ends up with the right numbers if we abort instead of
 	 * committing.)
 	 */
@@ -1603,7 +1605,7 @@ pgstat_end_function_usage(PgStat_FunctionCallUsage *fcu, bool finalize)
 
 	/*
 	 * Compute the new f_total_time as the total elapsed time added to the
-	 * pre-call value of f_total_time.	This is necessary to avoid
+	 * pre-call value of f_total_time.  This is necessary to avoid
 	 * double-counting any time taken by recursive calls of myself.  (We do
 	 * not need any similar kluge for self time, since that already excludes
 	 * any recursive calls.)
@@ -2089,7 +2091,7 @@ AtPrepare_PgStat(void)
  *		Clean up after successful PREPARE.
  *
  * All we need do here is unlink the transaction stats state from the
- * nontransactional state.	The nontransactional action counts will be
+ * nontransactional state.  The nontransactional action counts will be
  * reported to the stats collector immediately, while the effects on live
  * and dead tuple counts are preserved in the 2PC state file.
  *
@@ -2315,8 +2317,8 @@ pgstat_fetch_stat_beentry(int beid)
 /* ----------
  * pgstat_fetch_stat_local_beentry() -
  *
- *  Like pgstat_fetch_stat_beentry() but with locally computed addtions (like
- *  xid and xmin values of the backend)
+ *	Like pgstat_fetch_stat_beentry() but with locally computed addtions (like
+ *	xid and xmin values of the backend)
  *
  *	NB: caller is responsible for a check if the user is permitted to see
  *	this info (especially the querystring).
@@ -2579,7 +2581,11 @@ pgstat_bestart(void)
 	beentry->st_databaseid = MyDatabaseId;
 	beentry->st_userid = userid;
 	beentry->st_clientaddr = clientaddr;
-	beentry->st_clienthostname[0] = '\0';
+	if (MyProcPort && MyProcPort->remote_hostname)
+		strlcpy(beentry->st_clienthostname, MyProcPort->remote_hostname,
+				NAMEDATALEN);
+	else
+		beentry->st_clienthostname[0] = '\0';
 	beentry->st_waiting = false;
 	beentry->st_state = STATE_UNDEFINED;
 	beentry->st_appname[0] = '\0';
@@ -2591,9 +2597,6 @@ pgstat_bestart(void)
 
 	beentry->st_changecount++;
 	Assert((beentry->st_changecount & 1) == 0);
-
-	if (MyProcPort && MyProcPort->remote_hostname)
-		strlcpy(beentry->st_clienthostname, MyProcPort->remote_hostname, NAMEDATALEN);
 
 	/* Update app name to current GUC setting */
 	if (application_name)
@@ -2667,7 +2670,7 @@ pgstat_report_activity(BackendState state, const char *cmd_str)
 		{
 			/*
 			 * track_activities is disabled, but we last reported a
-			 * non-disabled state.	As our final update, change the state and
+			 * non-disabled state.  As our final update, change the state and
 			 * clear fields we will not be updating anymore.
 			 */
 			beentry->st_changecount++;
@@ -2892,12 +2895,12 @@ pgstat_read_current_status(void)
  * pgstat_get_backend_current_activity() -
  *
  *	Return a string representing the current activity of the backend with
- *	the specified PID.	This looks directly at the BackendStatusArray,
+ *	the specified PID.  This looks directly at the BackendStatusArray,
  *	and so will provide current information regardless of the age of our
  *	transaction's snapshot of the status array.
  *
  *	It is the caller's responsibility to invoke this only for backends whose
- *	state is expected to remain stable while the result is in use.	The
+ *	state is expected to remain stable while the result is in use.  The
  *	only current use is in deadlock reporting, where we can expect that
  *	the target backend is blocked on a lock.  (There are corner cases
  *	where the target's wait could get aborted while we are looking at it,
@@ -2965,7 +2968,7 @@ pgstat_get_backend_current_activity(int pid, bool checkUser)
  * pgstat_get_crashed_backend_activity() -
  *
  *	Return a string representing the current activity of the backend with
- *	the specified PID.	Like the function above, but reads shared memory with
+ *	the specified PID.  Like the function above, but reads shared memory with
  *	the expectation that it may be corrupt.  On success, copy the string
  *	into the "buffer" argument and return that pointer.  On failure,
  *	return NULL.
@@ -2974,7 +2977,7 @@ pgstat_get_backend_current_activity(int pid, bool checkUser)
  *	query that crashed a backend.  In particular, no attempt is made to
  *	follow the correct concurrency protocol when accessing the
  *	BackendStatusArray.  But that's OK, in the worst case we'll return a
- *	corrupted message.	We also must take care not to trip on ereport(ERROR).
+ *	corrupted message.  We also must take care not to trip on ereport(ERROR).
  * ----------
  */
 const char *
@@ -3094,7 +3097,7 @@ pgstat_send(void *msg, int len)
 void
 pgstat_send_archiver(const char *xlog, bool failed)
 {
-	PgStat_MsgArchiver	msg;
+	PgStat_MsgArchiver msg;
 
 	/*
 	 * Prepare and send the message
@@ -3142,7 +3145,7 @@ pgstat_send_bgwriter(void)
 /* ----------
  * PgstatCollectorMain() -
  *
- *	Start up the statistics collector process.	This is the body of the
+ *	Start up the statistics collector process.  This is the body of the
  *	postmaster child process.
  *
  *	The argc/argv parameters are valid only in EXEC_BACKEND case.
@@ -3163,7 +3166,7 @@ PgstatCollectorMain(int argc, char *argv[])
 
 	/*
 	 * If possible, make this process a group leader, so that the postmaster
-	 * can signal any child processes too.	(pgstat probably never has any
+	 * can signal any child processes too.  (pgstat probably never has any
 	 * child processes, but for consistency we make all postmaster child
 	 * processes do this.)
 	 */
@@ -3392,7 +3395,7 @@ PgstatCollectorMain(int argc, char *argv[])
 
 		/*
 		 * Windows, at least in its Windows Server 2003 R2 incarnation,
-		 * sometimes loses FD_READ events.	Waking up and retrying the recv()
+		 * sometimes loses FD_READ events.  Waking up and retrying the recv()
 		 * fixes that, so don't sleep indefinitely.  This is a crock of the
 		 * first water, but until somebody wants to debug exactly what's
 		 * happening there, this is the best we can do.  The two-second
@@ -3909,8 +3912,8 @@ pgstat_read_statsfiles(Oid onlydb, bool permanent, bool deep)
 						 HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
 	/*
-	 * Clear out global and archiver statistics so they start from zero
-	 * in case we can't load an existing statsfile.
+	 * Clear out global and archiver statistics so they start from zero in
+	 * case we can't load an existing statsfile.
 	 */
 	memset(&globalStats, 0, sizeof(globalStats));
 	memset(&archiverStats, 0, sizeof(archiverStats));
@@ -4268,7 +4271,7 @@ pgstat_read_db_statsfile_timestamp(Oid databaseid, bool permanent,
 	const char *statfile = permanent ? PGSTAT_STAT_PERMANENT_FILENAME : pgstat_stat_filename;
 
 	/*
-	 * Try to open the stats file.	As above, anything but ENOENT is worthy of
+	 * Try to open the stats file.  As above, anything but ENOENT is worthy of
 	 * complaining about.
 	 */
 	if ((fpin = AllocateFile(statfile, PG_BINARY_R)) == NULL)
@@ -4416,7 +4419,7 @@ backend_read_statsfile(void)
 			 *
 			 * We don't recompute min_ts after sleeping, except in the
 			 * unlikely case that cur_ts went backwards.  So we might end up
-			 * accepting a file a bit older than PGSTAT_STAT_INTERVAL.	In
+			 * accepting a file a bit older than PGSTAT_STAT_INTERVAL.  In
 			 * practice that shouldn't happen, though, as long as the sleep
 			 * time is less than PGSTAT_STAT_INTERVAL; and we don't want to
 			 * tell the collector that our cutoff time is less than what we'd
@@ -4509,7 +4512,7 @@ pgstat_setup_memcxt(void)
 /* ----------
  * pgstat_clear_snapshot() -
  *
- *	Discard any data collected in the current transaction.	Any subsequent
+ *	Discard any data collected in the current transaction.  Any subsequent
  *	request will cause new snapshots to be read.
  *
  *	This is also invoked during transaction commit or abort to discard
@@ -4772,7 +4775,7 @@ pgstat_recv_dropdb(PgStat_MsgDropdb *msg, int len)
 	{
 		char		statfile[MAXPGPATH];
 
-		get_dbstat_filename(true, false, dbid, statfile, MAXPGPATH);
+		get_dbstat_filename(false, false, dbid, statfile, MAXPGPATH);
 
 		elog(DEBUG2, "removing %s", statfile);
 		unlink(statfile);
@@ -4993,7 +4996,7 @@ pgstat_recv_archiver(PgStat_MsgArchiver *msg, int len)
 		/* Failed archival attempt */
 		++archiverStats.failed_count;
 		memcpy(archiverStats.last_failed_wal, msg->m_xlog,
-			sizeof(archiverStats.last_failed_wal));
+			   sizeof(archiverStats.last_failed_wal));
 		archiverStats.last_failed_timestamp = msg->m_timestamp;
 	}
 	else
@@ -5001,7 +5004,7 @@ pgstat_recv_archiver(PgStat_MsgArchiver *msg, int len)
 		/* Successful archival operation */
 		++archiverStats.archived_count;
 		memcpy(archiverStats.last_archived_wal, msg->m_xlog,
-			sizeof(archiverStats.last_archived_wal));
+			   sizeof(archiverStats.last_archived_wal));
 		archiverStats.last_archived_timestamp = msg->m_timestamp;
 	}
 }

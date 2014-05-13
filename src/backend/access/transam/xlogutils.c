@@ -20,7 +20,6 @@
 #include "access/xlog.h"
 #include "access/xlogutils.h"
 #include "catalog/catalog.h"
-#include "common/relpath.h"
 #include "storage/smgr.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
@@ -445,6 +444,9 @@ CreateFakeRelcacheEntry(RelFileNode rnode)
 void
 FreeFakeRelcacheEntry(Relation fakerel)
 {
+	/* make sure the fakerel is not referenced by the SmgrRelation anymore */
+	if (fakerel->rd_smgr != NULL)
+		smgrclearowner(&fakerel->rd_smgr, fakerel->rd_smgr);
 	pfree(fakerel);
 }
 

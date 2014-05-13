@@ -18,7 +18,7 @@
  * to produce a new database.
  *
  * For largely-historical reasons, the template1 database is the one built
- * by the basic bootstrap process.	After it is complete, template0 and
+ * by the basic bootstrap process.  After it is complete, template0 and
  * the default database, postgres, are made just by copying template1.
  *
  * To create template1, we run the postgres (backend) program in bootstrap
@@ -198,7 +198,10 @@ static const char *subdirs[] = {
 	"pg_replslot",
 	"pg_tblspc",
 	"pg_stat",
-	"pg_stat_tmp"
+	"pg_stat_tmp",
+	"pg_llog",
+	"pg_llog/snapshots",
+	"pg_llog/mappings"
 };
 
 
@@ -561,16 +564,6 @@ walkdir(char *path, void (*action) (char *fname, bool isdir))
 			(*action) (subpath, false);
 	}
 
-#ifdef WIN32
-
-	/*
-	 * This fix is in mingw cvs (runtime/mingwex/dirent.c rev 1.4), but not in
-	 * released version
-	 */
-	if (GetLastError() == ERROR_NO_MORE_FILES)
-		errno = 0;
-#endif
-
 	if (errno)
 	{
 		fprintf(stderr, _("%s: could not read directory \"%s\": %s\n"),
@@ -578,12 +571,17 @@ walkdir(char *path, void (*action) (char *fname, bool isdir))
 		exit_nicely();
 	}
 
-	closedir(dir);
+	if (closedir(dir))
+	{
+		fprintf(stderr, _("%s: could not close directory \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	/*
 	 * It's important to fsync the destination directory itself as individual
 	 * file fsyncs don't guarantee that the directory entry for the file is
-	 * synced.	Recent versions of ext4 have made the window much wider but
+	 * synced.  Recent versions of ext4 have made the window much wider but
 	 * it's been an issue for ext3 and other filesystems in the past.
 	 */
 	(*action) (path, true);
@@ -616,7 +614,7 @@ pre_sync_fname(char *fname, bool isdir)
 	}
 
 	/*
-	 * Prefer sync_file_range, else use posix_fadvise.	We ignore any error
+	 * Prefer sync_file_range, else use posix_fadvise.  We ignore any error
 	 * here since this operation is only a hint anyway.
 	 */
 #if defined(HAVE_SYNC_FILE_RANGE)
@@ -774,7 +772,7 @@ exit_nicely(void)
 static char *
 get_id(void)
 {
-	const char	   *username;
+	const char *username;
 
 #ifndef WIN32
 	if (geteuid() == 0)			/* 0 is root's uid */
@@ -1059,13 +1057,13 @@ static char *
 choose_dsm_implementation(void)
 {
 #ifdef HAVE_SHM_OPEN
-	int		ntries = 10;
+	int			ntries = 10;
 
 	while (ntries > 0)
 	{
-		uint32	handle;
-		char 	name[64];
-		int		fd;
+		uint32		handle;
+		char		name[64];
+		int			fd;
 
 		handle = random();
 		snprintf(name, 64, "/PostgreSQL.%u", handle);
@@ -1132,11 +1130,11 @@ test_config_settings(void)
 		test_buffs = MIN_BUFS_FOR_CONNS(test_conns);
 
 		snprintf(cmd, sizeof(cmd),
-				 SYSTEMQUOTE "\"%s\" --boot -x0 %s "
+				 "\"%s\" --boot -x0 %s "
 				 "-c max_connections=%d "
 				 "-c shared_buffers=%d "
 				 "-c dynamic_shared_memory_type=none "
-				 "< \"%s\" > \"%s\" 2>&1" SYSTEMQUOTE,
+				 "< \"%s\" > \"%s\" 2>&1",
 				 backend_exec, boot_options,
 				 test_conns, test_buffs,
 				 DEVNULL, DEVNULL);
@@ -1167,11 +1165,11 @@ test_config_settings(void)
 		}
 
 		snprintf(cmd, sizeof(cmd),
-				 SYSTEMQUOTE "\"%s\" --boot -x0 %s "
+				 "\"%s\" --boot -x0 %s "
 				 "-c max_connections=%d "
 				 "-c shared_buffers=%d "
 				 "-c dynamic_shared_memory_type=none "
-				 "< \"%s\" > \"%s\" 2>&1" SYSTEMQUOTE,
+				 "< \"%s\" > \"%s\" 2>&1",
 				 backend_exec, boot_options,
 				 n_connections, test_buffs,
 				 DEVNULL, DEVNULL);
@@ -1293,7 +1291,12 @@ setup_config(void)
 	snprintf(path, sizeof(path), "%s/postgresql.conf", pg_data);
 
 	writefile(path, conflines);
-	chmod(path, S_IRUSR | S_IWUSR);
+	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
+	{
+		fprintf(stderr, _("%s: could not change permissions of \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	/*
 	 * create the automatic configuration file to store the configuration
@@ -1308,7 +1311,12 @@ setup_config(void)
 	sprintf(path, "%s/%s", pg_data, PG_AUTOCONF_FILENAME);
 
 	writefile(path, autoconflines);
-	chmod(path, S_IRUSR | S_IWUSR);
+	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
+	{
+		fprintf(stderr, _("%s: could not change permissions of \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	free(conflines);
 
@@ -1346,7 +1354,7 @@ setup_config(void)
 
 		/* for best results, this code should match parse_hba() */
 		hints.ai_flags = AI_NUMERICHOST;
-		hints.ai_family = PF_UNSPEC;
+		hints.ai_family = AF_UNSPEC;
 		hints.ai_socktype = 0;
 		hints.ai_protocol = 0;
 		hints.ai_addrlen = 0;
@@ -1387,7 +1395,12 @@ setup_config(void)
 	snprintf(path, sizeof(path), "%s/pg_hba.conf", pg_data);
 
 	writefile(path, conflines);
-	chmod(path, S_IRUSR | S_IWUSR);
+	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
+	{
+		fprintf(stderr, _("%s: could not change permissions of \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	free(conflines);
 
@@ -1398,7 +1411,12 @@ setup_config(void)
 	snprintf(path, sizeof(path), "%s/pg_ident.conf", pg_data);
 
 	writefile(path, conflines);
-	chmod(path, S_IRUSR | S_IWUSR);
+	if (chmod(path, S_IRUSR | S_IWUSR) != 0)
+	{
+		fprintf(stderr, _("%s: could not change permissions of \"%s\": %s\n"),
+				progname, path, strerror(errno));
+		exit_nicely();
+	}
 
 	free(conflines);
 
@@ -1957,8 +1975,14 @@ setup_collation(void)
 		 * only, so this doesn't clash with "en_US" for LATIN1, say.
 		 */
 		if (normalize_locale_name(alias, localebuf))
+		{
+			char	   *quoted_alias = escape_quotes(alias);
+
 			PG_CMD_PRINTF3("INSERT INTO tmp_pg_collation VALUES (E'%s', E'%s', %d);\n",
-						   escape_quotes(alias), quoted_locale, enc);
+						   quoted_alias, quoted_locale, enc);
+			free(quoted_alias);
+		}
+		free(quoted_locale);
 	}
 
 	/* Add an SQL-standard name */
@@ -1968,7 +1992,7 @@ setup_collation(void)
 	 * When copying collations to the final location, eliminate aliases that
 	 * conflict with an existing locale name for the same encoding.  For
 	 * example, "br_FR.iso88591" is normalized to "br_FR", both for encoding
-	 * LATIN1.	But the unnormalized locale "br_FR" already exists for LATIN1.
+	 * LATIN1.  But the unnormalized locale "br_FR" already exists for LATIN1.
 	 * Prefer the alias that matches the OS locale name, else the first locale
 	 * name by sort order (arbitrary choice to be deterministic).
 	 *
@@ -2075,7 +2099,7 @@ setup_dictionary(void)
 /*
  * Set up privileges
  *
- * We mark most system catalogs as world-readable.	We don't currently have
+ * We mark most system catalogs as world-readable.  We don't currently have
  * to touch functions, languages, or databases, because their default
  * permissions are OK.
  *
@@ -2508,7 +2532,7 @@ locale_date_order(const char *locale)
  * Is the locale name valid for the locale category?
  *
  * If successful, and canonname isn't NULL, a malloc'd copy of the locale's
- * canonical name is stored there.	This is especially useful for figuring out
+ * canonical name is stored there.  This is especially useful for figuring out
  * what locale name "" means (ie, the environment value).  (Actually,
  * it seems that on most implementations that's the only thing it's good for;
  * we could wish that setlocale gave back a canonically spelled version of

@@ -51,6 +51,7 @@ SUBDIRS = \
 		sprocket	\
 		tablefunc	\
 		tcn		\
+		test_decoding	\
 		test_parser	\
 		test_shm_mq	\
 		tsearch2	\

@@ -481,7 +481,7 @@ main(int argc, char *argv[])
 	(void) umask(umask(S_IWGRP | S_IWOTH) | (S_IWGRP | S_IWOTH));
 #endif   /* !WIN32 */
 	progname = argv[0];
-	if (TYPE_BIT(zic_t) < 64)
+	if (TYPE_BIT(zic_t) <64)
 	{
 		(void) fprintf(stderr, "%s: %s\n", progname,
 					   _("wild compilation-time specification of zic_t"));
