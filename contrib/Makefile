@@ -48,6 +48,7 @@ SUBDIRS = \
 		postgres_fdw	\
 		seg		\
 		spi		\
+		sprocket	\
 		tablefunc	\
 		tcn		\
 		test_parser	\
