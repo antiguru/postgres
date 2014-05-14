@@ -15,6 +15,7 @@
 
 #include "libpq-fe.h"
 
+void SprocketTestComplete(void);
 
 
 #endif /* SPROCKET_H_ */

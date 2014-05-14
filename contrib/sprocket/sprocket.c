@@ -17,8 +17,12 @@
 #include "executor/spi.h"
 #include "commands/trigger.h"
 #include "commands/event_trigger.h"
+#include "utils/portal.h"
 
 #include "utils/json.h"
+
+static const char* sprocket_char_select_sandboxes =
+		"SELECT sandbox_id, notification, completeness_query FROM sprocket.sandboxes";
 
 PG_MODULE_MAGIC
 ;
@@ -62,6 +66,10 @@ void _PG_fini() {
 void SprocketXactEvent(XactEvent event, void *arg) {
 	printf("event %i, txn %i, count %i\n", event, GetCurrentTransactionId(),
 			count);
+	printf("event == XACT_EVENT_PRE_COMMIT? %d\n", event == XACT_EVENT_PRE_COMMIT);
+	if (event == XACT_EVENT_PRE_COMMIT) {
+		SprocketTestComplete();
+	}
 }
 
 void SprocketSubXactEvent(SubXactEvent event, SubTransactionId mySubid,
@@ -140,4 +148,33 @@ Datum sprocket_ddl(PG_FUNCTION_ARGS) {
 	;
 }
 
+SPIPlanPtr sprocketSelectSandboxes = NULL;
+
+void SprocketTestComplete(void) {
+	int ret;
+	int count;
+	SPI_connect();
+	if (!sprocketSelectSandboxes) {
+		sprocketSelectSandboxes = SPI_prepare(sprocket_char_select_sandboxes, 0,
+		NULL);
+		sprocketSelectSandboxes = SPI_saveplan(sprocketSelectSandboxes);
+	}
+
+	ret = SPI_execute_plan(sprocketSelectSandboxes, NULL, NULL, true, 0);
+	count = SPI_processed;
+
+	if (ret > 0 && SPI_tuptable != NULL) {
+		TupleDesc tupdesc = SPI_tuptable->tupdesc;
+		SPITupleTable *tuptable = SPI_tuptable;
+
+		for (int i = 0; i < count; i++) {
+			HeapTuple tuple = tuptable->vals[i];
+
+			printf("Sandbox: %s %s %s\n", SPI_getvalue(tuple, tupdesc, 1),
+					SPI_getvalue(tuple, tupdesc, 2),
+					SPI_getvalue(tuple, tupdesc, 3));
+		}
+	}
+	SPI_finish();
+}
 
