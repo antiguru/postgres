@@ -175,7 +175,7 @@
      </para>
 
      <para>
-      Previously, stripped lexemes got a default location and could be
+      Previously stripped lexemes got a default location and could be
       considered if mixed with non-stripped lexemes.
      </para>
     </listitem>
@@ -198,6 +198,21 @@
       Use the last specified <link
       linkend="recovery-target"><varname>recovery_target</></link> if
       multiple are specified (Heikki Linnakangas)
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      On Windows, automatically preserve quotes in command strings supplied
+      by the user (Heikki Linnakangas)
+     </para>
+
+     <para>
+      User commands that did their own quote preservation might need
+      adjustment, e.g.  <link
+      linkend="guc-archive-command">archive_command</link>, <link
+      linkend="restore-command">restore_command</link>, <command>COPY TO/FROM
+      PROGRAM</>.
      </para>
     </listitem>
 
@@ -268,7 +283,7 @@
      </para>
 
      <para>
-      Previously, <option>-u</> was used to specify the user name.
+      Previously <option>-u</> was used to specify the user name.
       Also spell the long option as <option>--username</>, again for
       consistency with other tools.
      </para>
@@ -1097,22 +1112,25 @@
 
       <listitem>
        <para>
-        Allow the updating of <link
-        linkend="SQL-CREATEVIEW-updatable-views">views</link>
-        where only some columns are auto-updateable (Dean Rasheed)
+        Allow views to be <link
+        linkend="SQL-CREATEVIEW-updatable-views">automatically
+        updated</link> even if they contain some non-updatable columns
+        (Dean Rasheed)
        </para>
 
        <para>
-        Previously the presence of a non-auto-updateable column prevented
-        all columns from being auto-updated.  Deletes are now supported
-        on suitable views even if no auto-updateable columns are present.
+        Previously the presence of non-updatable columns such as
+        expressions, literals, and function calls prevented automatic
+        updates.  Now <command>INSERT</>s, <command>UPDATE</>s and
+        <command>DELETE</>s are supported, provided that they do not
+        attempt to assign new values to any of the non-updatable columns.
        </para>
       </listitem>
 
       <listitem>
        <para>
         Allow control over whether <command>INSERT</>s and
-        <command>UPDATE</>s can add rows to an auto-updateable view that
+        <command>UPDATE</>s can add rows to an auto-updatable view that
         would no longer appear in the view (Dean Rasheed)
        </para>
 
@@ -1125,7 +1143,7 @@
       <listitem>
        <para>
         Allow <link linkend="rules-privileges">security barrier views</>
-        to be automatically updateable (Dean Rasheed)
+        to be automatically updatable (Dean Rasheed)
        </para>
       </listitem>
 
@@ -1244,7 +1262,8 @@
        <para>
         The line <emphasis>segment</> data type (<link
         linkend="datatype-lseg"><type>LSEG</></link>) has always been
-        fully supported.
+        fully supported.  The previous <type>line</> data type (enabled
+        only via a compile-time option) is not binary or dump-compatible.
        </para>
       </listitem>
 
@@ -1587,7 +1606,7 @@
        <para>
         Add variables <link
         linkend="plpgsql-extra-checks"><varname>plpgsql.extra_warnings</></link>
-        and <varname>plpgsql.extra_errors</>to enable additional PL/pgSQL
+        and <varname>plpgsql.extra_errors</> to enable additional PL/pgSQL
         warnings and errors (Marko Tiikkaja, Petr Jelinek)
        </para>
 
